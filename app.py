@@ -65,24 +65,18 @@ def get_announcement():
     # 파일명을 안전하게 만들어 기본 파일 경로를 생성
     filename = secure_filename(file_id)
 
-    # 가능한 확장자 목록
-    extensions = ['pdf', 'txt']
+    # 파일 경로 생성 (무조건 .txt 확장자를 가정)
+    filepath = os.path.join(PROCESSED_FILE_DIR, f"{filename}.txt")
+    if os.path.exists(filepath):
+        # 파일이 존재하면 해당 파일 제공
+        response = send_from_directory(PROCESSED_FILE_DIR, f"{filename}.txt", as_attachment=True)
+        # 텍스트 파일의 경우 UTF-8 인코딩을 명시
+        response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        return response
+    else:
+        # 파일이 없으면 404 오류 반환
+        abort(404)
 
-    # 확장자를 순회하며 파일 존재 여부 확인
-    for ext in extensions:
-        filepath = os.path.join(FILE_DIR, f"{filename}.{ext}")
-        if os.path.exists(filepath):
-            # 파일이 존재하면 해당 파일 제공
-            response = send_from_directory(FILE_DIR, f"{filename}.{ext}")
-            if ext == 'pdf':
-                response.headers['Content-Type'] = 'application/pdf'
-            elif ext == 'txt':
-                # 텍스트 파일의 경우 UTF-8 인코딩을 명시
-                response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-            return response
-
-    # 파일이 없으면 404 오류 반환
-    abort(404)
 
 if __name__ == '__main__':
     app.run(debug=True)
