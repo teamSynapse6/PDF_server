@@ -4,6 +4,7 @@ import requests
 import os
 import olefile
 
+
 app = Flask(__name__)
 
 # 애플리케이션의 루트 디렉토리 기반으로 절대 경로 생성
@@ -39,15 +40,20 @@ def upload_files():
     for item in data:
         file_url = item['url']
         file_id = item['id']
-        temp_path = os.path.join(BASE_DIR, f"{file_id}.temp")
+        # 파일 URL에서 파일명 추출
+        filename = file_url.split('/')[-1]
+        # 원래의 파일명과 확장자를 유지하여 저장
+        temp_path = os.path.join(BASE_DIR, filename)
         
         try:
             # 파일 다운로드
-            response = requests.get(file_url)
+            response = requests.get(file_url, timeout=10)
             with open(temp_path, 'wb') as f:
                 f.write(response.content)
+            print(f"Downloaded file saved as: {temp_path}")
             
-            if temp_path.endswith('.hwp'):
+                    
+            if filename.endswith('.hwp'):
                 # HWP 파일을 TXT 파일로 변환
                 txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
                 convert_hwp_to_txt(temp_path, txt_path)
@@ -55,14 +61,27 @@ def upload_files():
                 success_ids.append(file_id)  # 성공한 경우 ID 추가
             else:
                 raise ValueError("Unsupported file format")
+            
+        except requests.exceptions.Timeout as e:
+                    # 타임아웃 예외 처리
+                    print(f"Timeout occurred for file {file_id}. Error: {e}")
+                    failed_ids.append(file_id)
+                    # 남은 아이템도 실패 처리
+                    for remaining_item in data[data.index(item)+1:]:
+                        failed_ids.append(remaining_item['id'])
+                    break  # 남은 처리 중단
+
         except Exception as e:
             print(f"Failed to process file {file_id}. Error: {e}")
             failed_ids.append(file_id)  # 실패한 경우 ID 추가
+      
         finally:
+            # 다운로드 받은 파일 삭제
             if os.path.exists(temp_path):
-                os.remove(temp_path)  # 처리 후 임시 파일 삭제
+                os.remove(temp_path)
 
-    return jsonify({"message": "Files processing completed.", "success_ids": success_ids, "failed_ids": failed_ids}), 200
+    return jsonify({"success_ids": success_ids, "failed_ids": failed_ids}), 200
+
 
 @app.route('/announcement')
 def get_announcement():
