@@ -3,6 +3,7 @@ from werkzeug.utils import secure_filename
 import requests
 import fitz  # PyMuPDF
 import os
+import subprocess  # subprocess 모듈 추가
 
 app = Flask(__name__)
 
@@ -16,41 +17,56 @@ if not os.path.exists(PROCESSED_FILE_DIR):
     os.makedirs(PROCESSED_FILE_DIR)
 
 
+# HWP 파일을 TXT 파일로 변환하는 함수
+def convert_hwp_to_txt(hwp_path, txt_path):
+    command = ["hwp5txt", hwp_path, "-o", txt_path]
+    subprocess.run(command, check=True)
+
+
 @app.route('/announcement/upload', methods=['POST'])
 def upload_files():
     data = request.json
+    success_ids = []  # 성공한 아이템 ID 저장
+    failed_ids = []   # 실패한 아이템 ID 저장
+
     for item in data:
         file_url = item['url']
         file_id = item['id']
-        temp_path = os.path.join(BASE_DIR, f"{file_id}.temp") # 임시 확장자로 저장
-        
-        # 파일 다운로드
-        response = requests.get(file_url)
-        with open(temp_path, 'wb') as f:
-            f.write(response.content)
+        temp_path = os.path.join(BASE_DIR, f"{file_id}.temp")
         
         try:
-            # 다운로드한 파일이 PDF인지 확인
-            doc = fitz.open(temp_path)
-            # PDF를 TXT로 변환
-            text = ''
-            for page in doc:
-                text += page.get_text()
+            # 파일 다운로드
+            response = requests.get(file_url)
+            with open(temp_path, 'wb') as f:
+                f.write(response.content)
             
-            txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
-            with open(txt_path, 'w', encoding='utf-8') as txt_file:
-                txt_file.write(text)
-
-            doc.close() # PDF 파일 사용 후 닫기
+            if temp_path.endswith('.pdf') or temp_path.endswith('.hwp'):
+                if temp_path.endswith('.pdf'):
+                    # PDF 처리 로직
+                    doc = fitz.open(temp_path)
+                    text = ''
+                    for page in doc:
+                        text += page.get_text()
+                    txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
+                    with open(txt_path, 'w', encoding='utf-8') as txt_file:
+                        txt_file.write(text)
+                    doc.close()
+                elif temp_path.endswith('.hwp'):
+                    # HWP 처리 로직
+                    txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
+                    convert_hwp_to_txt(temp_path, txt_path)
+                
+                success_ids.append(file_id)  # 성공한 경우 ID 추가
+            else:
+                raise ValueError("Unsupported file format")
         except Exception as e:
-            print(f"File {file_id} is not a PDF or could not be processed. Error: {e}")
-            os.remove(temp_path) # PDF가 아니면 임시 파일 삭제
-            continue # 다음 아이템으로 넘어가기
-        
-        # 처리 완료 후 임시 파일 삭제
-        os.remove(temp_path)
+            print(f"Failed to process file {file_id}. Error: {e}")
+            failed_ids.append(file_id)  # 실패한 경우 ID 추가
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)  # 처리 후 임시 파일 삭제
 
-    return jsonify({"message": "Files processed successfully."}), 20
+    return jsonify({"message": "Files processing completed.", "success_ids": success_ids, "failed_ids": failed_ids}), 200
 
 
 
