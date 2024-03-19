@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, send_from_directory, abort
 from werkzeug.utils import secure_filename
 import requests
 import os
+import olefile
 
 app = Flask(__name__)
 
@@ -14,6 +15,20 @@ PROCESSED_FILE_DIR = os.path.join(BASE_DIR, 'processed_file')
 if not os.path.exists(PROCESSED_FILE_DIR):
     os.makedirs(PROCESSED_FILE_DIR)
 
+
+def convert_hwp_to_txt(hwp_path, txt_path):
+    try:
+        # HWP 파일을 열고 PrvText 스트림에서 텍스트 읽기
+        with olefile.OleFileIO(hwp_path) as f:
+            if f.exists('PrvText'):
+                encoded_text = f.openstream('PrvText').read() 
+                decoded_text = encoded_text.decode('utf-16')
+                with open(txt_path, 'w', encoding='utf-8') as txt_file:
+                    txt_file.write(decoded_text)
+            else:
+                raise ValueError("PrvText stream not found in HWP file")
+    except Exception as e:
+        raise e
 
 @app.route('/announcement/upload', methods=['POST'])
 def upload_files():
@@ -33,7 +48,7 @@ def upload_files():
                 f.write(response.content)
             
             if temp_path.endswith('.hwp'):
-                # HWP 처리 로직
+                # HWP 파일을 TXT 파일로 변환
                 txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
                 convert_hwp_to_txt(temp_path, txt_path)
                 
