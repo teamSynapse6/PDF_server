@@ -69,7 +69,7 @@ def get_announcement():
     filepath = os.path.join(PROCESSED_FILE_DIR, f"{filename}.txt")
     if os.path.exists(filepath):
         # 파일이 존재하면 해당 파일 제공
-        response = send_from_directory(PROCESSED_FILE_DIR, f"{filename}.txt", as_attachment=True)
+        response = send_from_directory(PROCESSED_FILE_DIR, f"{filename}.txt")
         # 텍스트 파일의 경우 UTF-8 인코딩을 명시
         response.headers['Content-Type'] = 'text/plain; charset=utf-8'
         return response
