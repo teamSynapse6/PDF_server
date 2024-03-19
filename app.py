@@ -50,7 +50,7 @@ def upload_files():
         # 처리 완료 후 임시 파일 삭제
         os.remove(temp_path)
 
-    return jsonify({"message": "Files processed successfully."}), 20
+    return jsonify({"message": "Files processed successfully."}), 200
 
 
 
