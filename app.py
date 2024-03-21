@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, abort, send_from_directory,Response
+from flask import Flask, request, jsonify, abort, Response
 import requests
 import fitz 
 import os
@@ -18,6 +18,19 @@ FILE_DIR = os.path.join(BASE_DIR, 'file')
 PROCESSED_FILE_DIR = os.path.join(BASE_DIR, 'processed_file')
 
 
+# 저장된 파일 리스트 get 메소드
+@app.route('/validation', methods=['GET'])
+def validate_files():
+    # PROCESSED_FILE_DIR 디렉토리에 있는 모든 파일의 이름을 리스트로 가져옵니다.
+    filenames = os.listdir(PROCESSED_FILE_DIR)
+    
+    # 파일명에서 '.txt' 확장자를 제거하여 id 리스트를 생성합니다.
+    file_ids = [filename[:-4] for filename in filenames if filename.endswith('.txt')]
+    
+    # id 리스트를 JSON 형태로 반환합니다.
+    return jsonify({"file_ids": file_ids}), 200
+
+# 저장된 특정 공고 정보 가져오기
 @app.route('/announcement')
 def get_announcement():
     file_id = request.args.get('id')
@@ -35,10 +48,30 @@ def get_announcement():
     else:
         abort(404)  # 파일이 없으면 404 오류 반환
 
+# 아이템 삭제 메소드
+@app.route('/announcement/delete', methods=['DELETE'])
+def delete_files():
+    data = request.get_json()
+    file_ids = data.get('id')
+    if not file_ids:
+        return jsonify({"error": "No file ids provided"}), 400
+
+    for file_id in file_ids:
+        filename = f"{file_id}.txt"
+        filepath = os.path.join(PROCESSED_FILE_DIR, filename)
+        if os.path.exists(filepath):
+            try:
+                os.remove(filepath)
+            except Exception as e:
+                print(f"Error deleting file {file_id}: {e}")
+    return jsonify({"status": "finished"}), 200
+
+
 # processed_file 디렉토리가 없으면 생성
 if not os.path.exists(PROCESSED_FILE_DIR):
     os.makedirs(PROCESSED_FILE_DIR)
 
+# pdf, hwp id 반환후 다운 처리 프로세스
 @app.route('/announcement/upload', methods=['POST'])
 def upload_files():
     data = request.json
