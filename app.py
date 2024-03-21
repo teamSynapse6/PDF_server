@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, abort, send_from_directory
+from flask import Flask, request, jsonify, abort, send_from_directory,Response
 import requests
 import fitz 
 import os
@@ -20,26 +20,20 @@ PROCESSED_FILE_DIR = os.path.join(BASE_DIR, 'processed_file')
 
 @app.route('/announcement')
 def get_announcement():
-    # 쿼리 파라미터에서 file_id 추출
     file_id = request.args.get('id')
     if not file_id:
-        # file_id가 없으면 400 Bad Request 오류 반환
-        abort(400)
+        abort(400)  # file_id가 없으면 400 Bad Request 오류 반환
 
-    # 파일명을 안전하게 만들어 기본 파일 경로를 생성
-    filename = secure_filename(file_id)
+    filename = secure_filename(file_id) + '.txt'
+    filepath = os.path.join(PROCESSED_FILE_DIR, filename)
 
-    # 파일 경로 생성 (무조건 .txt 확장자를 가정)
-    filepath = os.path.join(PROCESSED_FILE_DIR, f"{filename}.txt")
     if os.path.exists(filepath):
-        # 파일이 존재하면 해당 파일 제공
-        response = send_from_directory(PROCESSED_FILE_DIR, f"{filename}.txt")
-        # 텍스트 파일의 경우 UTF-8 인코딩을 명시
-        response.headers['Content-Type'] = 'text/plain; charset=utf-8'
-        return response
+        # 파일이 존재하면 해당 파일의 내용을 읽어서 반환
+        with open(filepath, 'r', encoding='utf-8') as file:
+            content = file.read()
+        return Response(content, mimetype='text/plain; charset=utf-8')
     else:
-        # 파일이 없으면 404 오류 반환
-        abort(404)
+        abort(404)  # 파일이 없으면 404 오류 반환
 
 # processed_file 디렉토리가 없으면 생성
 if not os.path.exists(PROCESSED_FILE_DIR):
@@ -171,6 +165,11 @@ def convert_hwp_to_txt(hwp_path, output_folder):
     except Exception as e:
         print(f"파일 처리 중 오류가 발생했습니다: {e}")
         raise
+    finally:
+        # 변환 작업이 완료된 후 원본 HWP 파일 삭제
+        if os.path.exists(hwp_path):
+            os.remove(hwp_path)
+            print(f"원본 파일이 삭제되었습니다: {hwp_path}")
 
 if __name__ == '__main__':
     app.run(debug=True)
