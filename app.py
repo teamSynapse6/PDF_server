@@ -1,8 +1,14 @@
-from flask import Flask, request, jsonify, send_from_directory, abort
-from werkzeug.utils import secure_filename
+from flask import Flask, request, jsonify, abort, send_from_directory
 import requests
-import fitz  # PyMuPDF
+import fitz 
 import os
+from werkzeug.utils import secure_filename
+import shutil
+import olefile
+import os
+import zlib
+import struct
+
 
 app = Flask(__name__)
 
@@ -10,48 +16,6 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILE_DIR = os.path.join(BASE_DIR, 'file')
 PROCESSED_FILE_DIR = os.path.join(BASE_DIR, 'processed_file')
-
-# processed_file 디렉토리가 없으면 생성
-if not os.path.exists(PROCESSED_FILE_DIR):
-    os.makedirs(PROCESSED_FILE_DIR)
-
-
-@app.route('/announcement/upload', methods=['POST'])
-def upload_files():
-    data = request.json
-    for item in data:
-        file_url = item['url']
-        file_id = item['id']
-        temp_path = os.path.join(BASE_DIR, f"{file_id}.temp") # 임시 확장자로 저장
-        
-        # 파일 다운로드
-        response = requests.get(file_url)
-        with open(temp_path, 'wb') as f:
-            f.write(response.content)
-        
-        try:
-            # 다운로드한 파일이 PDF인지 확인
-            doc = fitz.open(temp_path)
-            # PDF를 TXT로 변환
-            text = ''
-            for page in doc:
-                text += page.get_text()
-            
-            txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
-            with open(txt_path, 'w', encoding='utf-8') as txt_file:
-                txt_file.write(text)
-
-            doc.close() # PDF 파일 사용 후 닫기
-        except Exception as e:
-            print(f"File {file_id} is not a PDF or could not be processed. Error: {e}")
-            os.remove(temp_path) # PDF가 아니면 임시 파일 삭제
-            continue # 다음 아이템으로 넘어가기
-        
-        # 처리 완료 후 임시 파일 삭제
-        os.remove(temp_path)
-
-    return jsonify({"message": "Files processed successfully."}), 200
-
 
 
 @app.route('/announcement')
@@ -77,6 +41,136 @@ def get_announcement():
         # 파일이 없으면 404 오류 반환
         abort(404)
 
+# processed_file 디렉토리가 없으면 생성
+if not os.path.exists(PROCESSED_FILE_DIR):
+    os.makedirs(PROCESSED_FILE_DIR)
+
+@app.route('/announcement/upload', methods=['POST'])
+def upload_files():
+    data = request.json
+    success_items = []
+    failed_items = []
+
+    for item in data:
+        file_url = item['url']
+        file_id = item['id']
+        file_format = item['format']
+        temp_path = os.path.join(BASE_DIR, f"{file_id}.{file_format}")  # 원본 파일 확장자로 저장
+
+        # 지원되는 파일 형식만 처리
+        if file_format in ['hwp', 'pdf', 'txt']:
+            try:
+                # 파일 다운로드
+                response = requests.get(file_url, stream=True)
+                with open(temp_path, 'wb') as f:
+                    shutil.copyfileobj(response.raw, f)
+
+                print(f"Downloaded file saved as: {temp_path}")
+
+                # 파일 형식에 따른 처리
+                if file_format == 'pdf':
+                    # PDF 파일을 TXT로 변환
+                    convert_pdf_to_txt(temp_path, file_id)
+                elif file_format == 'hwp':
+                    # HWP 파일을 TXT로 변환
+                    convert_hwp_to_txt(temp_path, PROCESSED_FILE_DIR)
+                elif file_format == 'txt':
+                    # TXT 파일은 바로 저장
+                    shutil.move(temp_path, os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt"))
+
+                success_items.append(file_id)
+
+            except Exception as e:
+                print(f"Error processing file {file_id}: {e}")
+                failed_items.append(file_id)
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)  # 실패 시 임시 파일 삭제
+        else:
+            print(f"Unsupported file format for file {file_id}")
+            failed_items.append(file_id)
+
+    return jsonify({"status": "finished", "success_items": success_items, "failed_items": failed_items}), 200
+
+def convert_pdf_to_txt(temp_path, file_id):
+    try:
+        # 다운로드한 PDF 파일 열기
+        doc = fitz.open(temp_path)
+        text = ''
+        for page in doc:
+            text += page.get_text()
+
+        txt_path = os.path.join(PROCESSED_FILE_DIR, f"{file_id}.txt")
+        with open(txt_path, 'w', encoding='utf-8') as txt_file:
+            txt_file.write(text)
+
+        doc.close()  # PDF 파일 사용 후 닫기
+        os.remove(temp_path)  # 처리 완료 후 원본 PDF 파일 삭제
+    except Exception as e:
+        print(f"PDF to TXT conversion failed for {file_id}: {e}")
+        raise e
+    
+def get_hwp_text(filename):
+    with olefile.OleFileIO(filename) as f:
+        dirs = f.listdir()
+
+        # 문서 포맷 압축 여부 확인
+        header = f.openstream("FileHeader")
+        header_data = header.read()
+        is_compressed = (header_data[36] & 1) == 1
+
+        # Body Sections 불러오기
+        nums = []
+        for d in dirs:
+            if d[0] == "BodyText":
+                nums.append(int(d[1][len("Section"):]))
+        sections = ["BodyText/Section"+str(x) for x in sorted(nums)]
+
+        # 전체 text 추출
+        text = ""
+        for section in sections:
+            bodytext = f.openstream(section)
+            data = bodytext.read()
+            if is_compressed:
+                unpacked_data = zlib.decompress(data, -15)
+            else:
+                unpacked_data = data
+
+            # 각 Section 내 text 추출    
+            section_text = ""
+            i = 0
+            size = len(unpacked_data)
+            while i < size:
+                header = struct.unpack_from("<I", unpacked_data, i)[0]
+                rec_type = header & 0x3ff
+                rec_len = (header >> 20) & 0xfff
+
+                if rec_type in [67]:  # 67은 텍스트 블록을 의미
+                    rec_data = unpacked_data[i+4:i+4+rec_len]
+                    section_text += rec_data.decode('utf-16')
+                    section_text += "\n"
+
+                i += 4 + rec_len
+
+            text += section_text
+            text += "\n"
+
+        return text
+    
+def convert_hwp_to_txt(hwp_path, output_folder):
+    try:
+        extracted_text = get_hwp_text(hwp_path)
+
+        file_id = os.path.basename(hwp_path).split('.')[0]
+        output_file_name = f"{file_id}.txt"
+        output_file_path = os.path.join(output_folder, output_file_name)
+
+        with open(output_file_path, 'w', encoding='utf-8') as output_file:
+            output_file.write(extracted_text)
+
+        print(f"파일이 저장되었습니다: {output_file_path}")
+    except Exception as e:
+        print(f"파일 처리 중 오류가 발생했습니다: {e}")
+        raise
 
 if __name__ == '__main__':
     app.run(debug=True)
