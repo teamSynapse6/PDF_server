@@ -22,6 +22,8 @@ PROCESSED_FILE_DIR = os.path.join(BASE_DIR, 'processed_file')
 @app.route('/validation', methods=['GET'])
 def validate_files():
     # PROCESSED_FILE_DIR 디렉토리에 있는 모든 파일의 이름을 리스트로 가져옵니다.
+
+    
     filenames = os.listdir(PROCESSED_FILE_DIR)
     
     # 파일명에서 '.txt' 확장자를 제거하여 id 리스트를 생성합니다.
