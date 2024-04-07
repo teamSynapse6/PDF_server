@@ -16,6 +16,43 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FILE_DIR = os.path.join(BASE_DIR, 'file')
 PROCESSED_FILE_DIR = os.path.join(BASE_DIR, 'processed_file')
+PRE_FILE_DIR = os.path.join(BASE_DIR, 'pre_file')
+
+
+
+#로컬 파일을 txt로 변환
+@app.route('/get_transform_from_prefile', methods=['GET'])
+def get_transform_from_prefile():
+    # pre_file 디렉토리에서 hwp와 pdf 파일 목록을 가져옵니다.
+    files = [f for f in os.listdir(PRE_FILE_DIR) if os.path.isfile(os.path.join(PRE_FILE_DIR, f)) and f.split('.')[-1] in ['hwp', 'pdf']]
+    
+    # 임시로 파일 URL 대신 파일 경로를 사용하는 데이터 구조를 생성합니다.
+    items_to_process = [{
+        "path": os.path.join(PRE_FILE_DIR, file),
+        "id": os.path.splitext(file)[0],  # 파일 이름에서 확장자를 제거하여 id를 생성합니다.
+        "format": file.split('.')[-1]  # 확장자를 format으로 사용합니다.
+    } for file in files]
+    
+    # 각 파일을 처리합니다.
+    for item in items_to_process:
+        file_path = item["path"]
+        file_id = item["id"]
+        file_format = item["format"]
+        
+        # 파일 형식에 따른 처리를 수행합니다.
+        try:
+            if file_format == 'pdf':
+                convert_pdf_to_txt(file_path, file_id)
+            elif file_format == 'hwp':
+                convert_hwp_to_txt(file_path, PROCESSED_FILE_DIR)
+            # 성공한 항목을 로그로 기록할 수 있습니다.
+            print(f"Processed: {file_id}.{file_format}")
+        except Exception as e:
+            # 실패한 항목을 처리합니다.
+            print(f"Failed to process {file_id}.{file_format}: {e}")
+    
+    return jsonify({"status": "finished", "message": "Files processed"}), 200
+
 
 
 # 저장된 파일 리스트 get 메소드
